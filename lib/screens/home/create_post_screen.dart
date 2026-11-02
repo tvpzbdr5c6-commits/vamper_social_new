@@ -114,8 +114,9 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
           colorText: Colors.white,
           duration: const Duration(seconds: 2),
         );
-        widget.onPostSuccess?.call(); // Call the success callback
-        Get.back();
+
+        widget.onPostSuccess?.call();
+        Get.offAllNamed('/home');
       } else {
         Get.snackbar(
           'Error',
@@ -142,7 +143,7 @@ class _CreatePostScreenState extends State<CreatePostScreen> {
                 ? const SizedBox(
                     width: 18,
                     height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
                   )
                 : const Text('Post', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
           ),

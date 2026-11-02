@@ -434,11 +434,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 subtitle: 'Remove temporary app data',
                 onTap: () async {
                   final prefs = await SharedPreferences.getInstance();
-                  await prefs.clear();
-                  _loadSettings();
+                  final keysToClear = [
+                    'settings_push_notifications',
+                    'settings_match_notifications',
+                    'settings_party_notifications',
+                    'settings_private_profile',
+                    'settings_show_online_status',
+                    'settings_allow_messages',
+                    'settings_show_in_search',
+                    'settings_dark_mode',
+                  ];
+
+                  for (final key in keysToClear) {
+                    await prefs.remove(key);
+                  }
+
+                  await prefs.remove(ApiConstants.keyUserSettings);
+                  await _loadSettings();
                   Get.snackbar(
                     'Cache cleared',
-                    'Temporary settings have been reset.',
+                    'Temporary local settings have been reset without affecting your login session.',
                     snackPosition: SnackPosition.BOTTOM,
                   );
                 },

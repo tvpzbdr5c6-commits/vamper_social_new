@@ -33,11 +33,18 @@ try {
                     FROM users u
                     LEFT JOIN shop_items frame
                       ON frame.id = u.active_profile_frame_id AND frame.type = 'profile_frame'
+                    LEFT JOIN user_settings us
+                      ON us.user_id = u.id AND us.setting_key = 'settings_show_in_search'
                     WHERE (u.full_name LIKE :term OR u.email LIKE :term)
                     AND u.is_active = 1
+                    AND (
+                        :current_user_id IS NOT NULL AND u.id = :current_user_id
+                        OR COALESCE(JSON_UNQUOTE(JSON_EXTRACT(us.setting_value, '$')), 1) = 1
+                    )
                     LIMIT 20";
         $stmt_u = $db->prepare($user_sql);
         $stmt_u->bindValue(':term', $like_term);
+        $stmt_u->bindValue(':current_user_id', $current_user_id, PDO::PARAM_INT);
         $stmt_u->execute();
         $matching_users = $stmt_u->fetchAll(PDO::FETCH_ASSOC);
     }

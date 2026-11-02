@@ -45,14 +45,20 @@ try {
             $deleteRelated->execute([':party_id' => $party_id]);
         }
     }
-    $closeParty = $db->prepare('UPDATE parties SET is_live = 0, participants_count = 0 WHERE id = :id AND host_id = :host_id');
-    $closeParty->execute([':id' => $party_id, ':host_id' => $hostId]);
+
+    $deleteParty = $db->prepare('DELETE FROM parties WHERE id = :id AND host_id = :host_id');
+    $deleteParty->execute([':id' => $party_id, ':host_id' => $hostId]);
+
+    if ($deleteParty->rowCount() === 0) {
+        throw new RuntimeException('Unable to delete the party room.');
+    }
+
     $db->commit();
 
     http_response_code(200);
     echo json_encode([
         "success" => true,
-        "message" => "Party room ended successfully."
+        "message" => "Party room deleted successfully."
     ]);
 
 } catch (Throwable $error) {
