@@ -57,6 +57,7 @@ class _PartyRoomScreenState extends State<PartyRoomScreen> {
   Room? _room;
   EventsListener<RoomEvent>? _roomListener;
   Timer? _syncTimer;
+  bool _isDeletingParty = false;
 
   @override
   void initState() {
@@ -543,6 +544,8 @@ class _PartyRoomScreenState extends State<PartyRoomScreen> {
   }
 
   void _deleteParty() {
+    if (_isDeletingParty) return;
+
     Get.dialog(
       AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -561,29 +564,57 @@ class _PartyRoomScreenState extends State<PartyRoomScreen> {
               foregroundColor: Colors.white,
             ),
             onPressed: () async {
-              Get.back(); // close dialog
+              Get.back();
+              if (!mounted) return;
+
+              setState(() => _isDeletingParty = true);
               try {
-                await _authController.apiService.post(
+                final response = await _authController.apiService.post(
                   '${ApiConstants.baseUrl}/delete-party.php',
                   data: {'party_id': widget.party['id']},
                 );
-                await _disconnectParty();
-                Get.back(); // return to party list
-                Get.snackbar(
-                  'Party Ended',
-                  'Room has been closed for all participants.',
-                  snackPosition: SnackPosition.BOTTOM,
-                );
+
+                final success = response.data is Map && response.data['success'] == true;
+                if (!mounted) return;
+
+                if (success) {
+                  await _disconnectParty();
+                  if (mounted) {
+                    Get.snackbar(
+                      'Party Ended',
+                      'Room has been closed for all participants.',
+                      snackPosition: SnackPosition.BOTTOM,
+                      backgroundColor: Colors.red.shade600,
+                      colorText: Colors.white,
+                      duration: const Duration(seconds: 2),
+                    );
+                    Get.back(result: true);
+                  }
+                } else {
+                  final message = response.data is Map
+                      ? (response.data['message']?.toString() ?? 'Unable to end the party room.')
+                      : 'Unable to end the party room.';
+                  throw StateError(message);
+                }
               } catch (error) {
                 debugPrint('Error ending party: $error');
+                if (!mounted) return;
                 Get.snackbar(
                   'Unable to end party',
-                  error.toString(),
+                  error.toString().replaceFirst('Bad state: ', ''),
                   snackPosition: SnackPosition.BOTTOM,
                 );
+              } finally {
+                if (mounted) setState(() => _isDeletingParty = false);
               }
             },
-            child: const Text('End & Delete'),
+            child: _isDeletingParty
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  )
+                : const Text('End & Delete'),
           ),
         ],
       ),
@@ -1368,11 +1399,6 @@ class _PartyRoomScreenState extends State<PartyRoomScreen> {
       if (shareEnabled &&
           !kIsWeb &&
           defaultTargetPlatform == TargetPlatform.android) {
-        final hasCapturePermission = await Helper.requestCapturePermission();
-        if (!hasCapturePermission) {
-          throw StateError('Screen capture permission was not granted.');
-        }
-
         var hasBackgroundPermissions = await FlutterBackground.hasPermissions;
         if (!hasBackgroundPermissions) {
           hasBackgroundPermissions = await FlutterBackground.initialize(
@@ -1391,12 +1417,6 @@ class _PartyRoomScreenState extends State<PartyRoomScreen> {
           throw StateError(
             'Background screen-share permission was not granted.',
           );
-        }
-        if (!FlutterBackground.isBackgroundExecutionEnabled) {
-          final enabled = await FlutterBackground.enableBackgroundExecution();
-          if (!enabled) {
-            throw StateError('Unable to start the screen-share service.');
-          }
         }
       }
 

@@ -19,6 +19,9 @@ class ApiConstants {
   static String get verifyOtp => '$baseUrl/verify-otp.php';
   static String get getProfile => '$baseUrl/get-profile.php';
   static String get updateProfile => '$baseUrl/update-profile.php';
+  static String get changePassword => '$baseUrl/change-password.php';
+  static String get getUserSettings => '$baseUrl/get-user-settings.php';
+  static String get updateUserSettings => '$baseUrl/update-user-settings.php';
   static String get uploadProfileFolder => '$baseUrl/upload-photo.php';
   static String get uploadProfilePhoto => '$baseUrl/upload-photo.php';
   static String get getUserPhotos => '$baseUrl/get-user-photos.php';
@@ -60,4 +63,5 @@ class ApiConstants {
   static const String keyUserId = 'user_id';
   static const String keyUserData = 'user_data';
   static const String keyIsLoggedIn = 'is_logged_in';
+  static const String keyUserSettings = 'user_settings';
 }

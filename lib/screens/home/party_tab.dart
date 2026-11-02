@@ -136,7 +136,9 @@ class _PartyTabState extends State<PartyTab> {
                         party: party,
                         accessPassword: password,
                       ),
-                    )?.then((_) => fetchParties());
+                    )?.then((result) {
+                      fetchParties();
+                    });
                   },
                   child: const Text('Join Room'),
                 ),
@@ -146,7 +148,9 @@ class _PartyTabState extends State<PartyTab> {
         ),
       );
     } else {
-      Get.to(() => PartyRoomScreen(party: party))?.then((_) => fetchParties());
+      Get.to(() => PartyRoomScreen(party: party))?.then((result) {
+        fetchParties();
+      });
     }
   }
 

@@ -21,6 +21,7 @@ import 'party_tab.dart';
 import '../wallet/store_screen.dart';
 import '../wallet/gift_collection_screen.dart';
 import '../../widgets/user_avatar_with_frame.dart';
+import '../settings/settings_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -136,7 +137,15 @@ class _HomeScreenState extends State<HomeScreen> {
             duration: const Duration(milliseconds: 200),
             opacity: _isFabVisible ? 1.0 : 0.0,
             child: FloatingActionButton(
-              onPressed: () => Get.to(() => const CreatePostScreen()),
+              onPressed: () => Get.to(
+                () => CreatePostScreen(
+                  onPostSuccess: () {
+                    if (mounted) {
+                      setState(() => _currentIndex = 0);
+                    }
+                  },
+                ),
+              ),
               backgroundColor: Colors.transparent,
               elevation: 4,
               child: Container(
@@ -718,14 +727,9 @@ class ProfileTab extends StatelessWidget {
               onTap: () => Get.to(() => const StoreScreen()),
             ),
             _ProfileMenuItem(
-              icon: Icons.edit,
-              title: 'Edit Profile',
-              onTap: () => Get.to(() => const EditProfileScreen()),
-            ),
-            _ProfileMenuItem(
               icon: Icons.settings,
               title: 'Settings',
-              onTap: () {},
+              onTap: () => Get.to(() => const SettingsScreen()),
             ),
             _ProfileMenuItem(
               icon: Icons.help_outline,
