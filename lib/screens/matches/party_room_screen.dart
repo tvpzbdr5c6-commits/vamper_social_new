@@ -13,6 +13,7 @@ import '../../controllers/auth_controller.dart';
 import '../../core/constants/api_constants.dart';
 import '../../models/gift_model.dart';
 import '../../widgets/user_avatar_with_frame.dart';
+import 'create_party_screen.dart';
 import '../wallet/coin_shop_screen.dart';
 
 class PartyRoomScreen extends StatefulWidget {
@@ -495,7 +496,7 @@ class _PartyRoomScreenState extends State<PartyRoomScreen> {
     }
   }
 
-  Future<void> _disconnectParty() async {
+  Future<void> _disconnectParty({bool notifyServer = true}) async {
     if (_isLeaving) return;
     _isLeaving = true;
     _syncTimer?.cancel();
@@ -528,19 +529,29 @@ class _PartyRoomScreenState extends State<PartyRoomScreen> {
     }
     _isScreenSharing = false;
     _roomConnected = false;
-    if (_hasJoinedParty) {
+    if (_hasJoinedParty && notifyServer) {
       try {
         await _partyAction('leave');
       } catch (error) {
         debugPrint('Unable to leave party membership: $error');
       }
-      _hasJoinedParty = false;
     }
+    _hasJoinedParty = false;
   }
 
   Future<void> _leaveParty() async {
     await _disconnectParty();
     if (mounted) Get.back();
+  }
+
+  Future<void> _editParty() async {
+    final updatedParty = await Get.to<Map<String, dynamic>>(
+      () => CreatePartyScreen(editParty: Map<String, dynamic>.from(widget.party)),
+    );
+    if (updatedParty != null && mounted) {
+      widget.party.addAll(updatedParty);
+      setState(() {});
+    }
   }
 
   void _deleteParty() {
@@ -568,6 +579,21 @@ class _PartyRoomScreenState extends State<PartyRoomScreen> {
               if (!mounted) return;
 
               setState(() => _isDeletingParty = true);
+              Get.dialog(
+                PopScope(
+                  canPop: false,
+                  child: AlertDialog(
+                    content: Row(
+                      children: [
+                        const CircularProgressIndicator(),
+                        const SizedBox(width: 20),
+                        Expanded(child: Text('Deleting party room...')),
+                      ],
+                    ),
+                  ),
+                ),
+                barrierDismissible: false,
+              );
               try {
                 final response = await _authController.apiService.post(
                   '${ApiConstants.baseUrl}/delete-party.php',
@@ -578,29 +604,29 @@ class _PartyRoomScreenState extends State<PartyRoomScreen> {
                 if (!mounted) return;
 
                 if (success) {
-                  await _disconnectParty();
-                  if (mounted) {
-                    Get.snackbar(
-                      'Party Deleted',
-                      'The room was removed for all participants.',
-                      snackPosition: SnackPosition.BOTTOM,
-                      backgroundColor: Colors.red.shade600,
-                      colorText: Colors.white,
-                      duration: const Duration(seconds: 2),
-                    );
-                    Get.back(result: true);
-                  }
+                  Get.back();
+                  Get.snackbar(
+                    'Party Deleted',
+                    'The room was removed for all participants.',
+                    snackPosition: SnackPosition.BOTTOM,
+                    backgroundColor: Colors.red.shade600,
+                    colorText: Colors.white,
+                    duration: const Duration(seconds: 2),
+                  );
+                  unawaited(_disconnectParty(notifyServer: false));
+                  Get.back(result: true);
                 } else {
                   final message = response.data is Map
-                      ? (response.data['message']?.toString() ?? 'Unable to end the party room.')
-                      : 'Unable to end the party room.';
+                      ? (response.data['message']?.toString() ?? 'Unable to delete the party room.')
+                      : 'Unable to delete the party room.';
                   throw StateError(message);
                 }
               } catch (error) {
-                debugPrint('Error ending party: $error');
+                debugPrint('Error deleting party: $error');
                 if (!mounted) return;
+                if (Get.isDialogOpen ?? false) Get.back();
                 Get.snackbar(
-                  'Unable to end party',
+                  'Unable to delete party',
                   error.toString().replaceFirst('Bad state: ', ''),
                   snackPosition: SnackPosition.BOTTOM,
                 );
@@ -1594,8 +1620,14 @@ class _PartyRoomScreenState extends State<PartyRoomScreen> {
           ),
           if (isHost)
             IconButton(
+              icon: const Icon(Icons.edit_outlined, color: Colors.white70),
+              tooltip: 'Edit Party',
+              onPressed: _editParty,
+            ),
+          if (isHost)
+            IconButton(
               icon: const Icon(Icons.delete_forever, color: Colors.redAccent),
-              tooltip: 'End & Delete Party',
+              tooltip: 'Delete Party',
               onPressed: _deleteParty,
             ),
           // Real-time Eye Viewer Count Badge

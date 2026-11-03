@@ -6,7 +6,9 @@ import '../../core/constants/api_constants.dart';
 import 'party_room_screen.dart';
 
 class CreatePartyScreen extends StatefulWidget {
-  const CreatePartyScreen({super.key});
+  final Map<String, dynamic>? editParty;
+
+  const CreatePartyScreen({super.key, this.editParty});
 
   @override
   State<CreatePartyScreen> createState() => _CreatePartyScreenState();
@@ -28,6 +30,29 @@ class _CreatePartyScreenState extends State<CreatePartyScreen> {
     'Dating & Matching 💕',
   ];
 
+  bool get isEditMode => widget.editParty != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final party = widget.editParty;
+    if (party != null) {
+      _titleController.text = party['title']?.toString() ?? '';
+      _selectedTheme = party['theme']?.toString() ?? _selectedTheme;
+      if (!themes.contains(_selectedTheme)) themes.insert(0, _selectedTheme);
+      _isPrivate = party['is_private'] == 1 ||
+          party['is_private'] == '1' ||
+          party['is_private'] == true;
+    }
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
   void _createParty() async {
     final title = _titleController.text.trim();
     if (title.isEmpty) {
@@ -39,7 +64,11 @@ class _CreatePartyScreenState extends State<CreatePartyScreen> {
       return;
     }
 
-    if (_isPrivate && _passwordController.text.trim().isEmpty) {
+    final password = _passwordController.text.trim();
+    final wasPrivate = widget.editParty?['is_private'] == 1 ||
+      widget.editParty?['is_private'] == '1' ||
+      widget.editParty?['is_private'] == true;
+    if (_isPrivate && password.isEmpty && !(isEditMode && wasPrivate)) {
       Get.snackbar(
         'Error',
         'Please enter a password for private room',
@@ -56,16 +85,37 @@ class _CreatePartyScreenState extends State<CreatePartyScreen> {
 
     try {
       final response = await authController.apiService.post(
-        '${ApiConstants.baseUrl}/create-party.php',
+        '${ApiConstants.baseUrl}/${isEditMode ? 'update-party.php' : 'create-party.php'}',
         data: {
+          if (isEditMode) 'party_id': widget.editParty!['id'],
           'title': title,
           'theme': _selectedTheme,
           'is_private': _isPrivate ? 1 : 0,
-          'password': _passwordController.text.trim(),
+          'password': password,
         },
       );
 
       if (response.data['success'] == true) {
+        final responseData = Map<String, dynamic>.from(response.data['data'] ?? {});
+        if (responseData['coins'] != null && authController.currentUser.value != null) {
+          await authController.updateCachedUser(
+            authController.currentUser.value!.copyWith(
+              coins: int.tryParse(responseData['coins'].toString()) ??
+                  authController.currentUser.value!.coins,
+            ),
+          );
+        }
+
+        if (isEditMode) {
+          Get.back(result: responseData);
+          Get.snackbar(
+            'Party updated',
+            'Your party room changes have been saved.',
+            snackPosition: SnackPosition.BOTTOM,
+          );
+          return;
+        }
+
         final partyId = response.data['data']['party_id'];
         Get.back(); // close create screen
         Get.to(
@@ -92,11 +142,11 @@ class _CreatePartyScreenState extends State<CreatePartyScreen> {
       print('Error creating party: $e');
       Get.snackbar(
         'Error',
-        'Failed to create party room',
+        e.toString().replaceFirst('Bad state: ', ''),
         snackPosition: SnackPosition.BOTTOM,
       );
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -105,9 +155,9 @@ class _CreatePartyScreenState extends State<CreatePartyScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text(
-          'Create Party Room 🎉',
-          style: TextStyle(
+        title: Text(
+          isEditMode ? 'Edit Party Room' : 'Create Party Room 🎉',
+          style: const TextStyle(
             color: AppColors.textPrimary,
             fontWeight: FontWeight.bold,
           ),
@@ -124,7 +174,20 @@ class _CreatePartyScreenState extends State<CreatePartyScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
+            if (!isEditMode)
+              Container(
+                padding: const EdgeInsets.all(14),
+                margin: const EdgeInsets.only(bottom: 20),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Text(
+                  'Your first 3 party rooms are free. Each room after that costs 200 VPC.',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+            Text(
               'Room Title',
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
             ),
@@ -188,7 +251,7 @@ class _CreatePartyScreenState extends State<CreatePartyScreen> {
             ),
             if (_isPrivate) ...[
               const SizedBox(height: 16),
-              const Text(
+              Text(
                 'Room Password',
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
               ),
@@ -197,7 +260,9 @@ class _CreatePartyScreenState extends State<CreatePartyScreen> {
                 controller: _passwordController,
                 obscureText: _obscurePassword,
                 decoration: InputDecoration(
-                  hintText: 'Enter room password...',
+                  hintText: isEditMode && _isPrivate
+                    ? 'Leave blank to keep current password'
+                    : 'Enter room password...',
                   filled: true,
                   fillColor: Colors.white,
                   border: OutlineInputBorder(
@@ -231,9 +296,9 @@ class _CreatePartyScreenState extends State<CreatePartyScreen> {
               ),
               child: _isLoading
                   ? const CircularProgressIndicator(color: Colors.white)
-                  : const Text(
-                      'Go Live 🎉',
-                      style: TextStyle(
+                  : Text(
+                    isEditMode ? 'Save Changes' : 'Go Live 🎉',
+                    style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
                       ),
