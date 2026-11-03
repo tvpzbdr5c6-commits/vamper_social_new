@@ -581,8 +581,8 @@ class _PartyRoomScreenState extends State<PartyRoomScreen> {
                   await _disconnectParty();
                   if (mounted) {
                     Get.snackbar(
-                      'Party Ended',
-                      'Room has been closed for all participants.',
+                      'Party Deleted',
+                      'The room was removed for all participants.',
                       snackPosition: SnackPosition.BOTTOM,
                       backgroundColor: Colors.red.shade600,
                       colorText: Colors.white,

@@ -32,9 +32,13 @@ try {
         exit();
     }
 
-    $settings = liveKitSettings();
-    if ($settings !== null) {
-        liveKitAdminRequest($settings, 'DeleteRoom', ['room' => 'vamper-party-' . (int)$party_id]);
+    try {
+        $settings = liveKitSettings();
+        if ($settings !== null) {
+            liveKitAdminRequest($settings, 'DeleteRoom', ['room' => 'vamper-party-' . (int)$party_id]);
+        }
+    } catch (Throwable $liveKitError) {
+        error_log('Unable to delete LiveKit room for party ' . (int)$party_id . ': ' . $liveKitError->getMessage());
     }
 
     $db->beginTransaction();
