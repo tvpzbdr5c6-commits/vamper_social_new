@@ -6,6 +6,56 @@ function adminQueryString(string $key, string $default = ''): string
     return isset($_GET[$key]) && is_string($_GET[$key]) ? $_GET[$key] : $default;
 }
 
+function adminDeleteRowsIfTableExists(PDO $db, string $table, string $where, array $params): void
+{
+    if (!adminTableExists($db, $table)) {
+        return;
+    }
+
+    $stmt = $db->prepare("DELETE FROM `$table` WHERE $where");
+    $stmt->execute($params);
+}
+
+function adminCollectUploadPath(array &$paths, mixed $value): void
+{
+    if (!is_string($value) || $value === '') {
+        return;
+    }
+
+    $path = parse_url($value, PHP_URL_PATH);
+    if (!is_string($path)) {
+        return;
+    }
+    $marker = strpos($path, 'uploads/');
+    if ($marker === false) {
+        return;
+    }
+
+    $relativePath = substr($path, $marker);
+    if (str_contains($relativePath, '..') || str_contains($relativePath, "\\")) {
+        return;
+    }
+
+    $paths[$relativePath] = true;
+}
+
+function adminDeleteUploads(array $paths): void
+{
+    $uploadRoot = realpath(__DIR__ . '/uploads');
+    if ($uploadRoot === false) {
+        return;
+    }
+
+    foreach (array_keys($paths) as $relativePath) {
+        $absolutePath = realpath(__DIR__ . '/' . $relativePath);
+        if ($absolutePath !== false
+            && str_starts_with($absolutePath, $uploadRoot . DIRECTORY_SEPARATOR)
+            && is_file($absolutePath)) {
+            @unlink($absolutePath);
+        }
+    }
+}
+
 ini_set('session.use_strict_mode', '1');
 session_name('vamper_admin');
 session_set_cookie_params([
@@ -145,10 +195,11 @@ if ($isAdminLoggedIn) {
 if ($isAdminLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $postAction = is_string($_POST['action'] ?? null) ? $_POST['action'] : '';
     $requiredPermission = match ($postAction) {
-        'set_user_status', 'create_user', 'edit_user' => 'users',
+        'set_user_status', 'create_user', 'edit_user', 'delete_user' => 'users',
         'adjust_coins', 'save_settings' => 'finance',
-        'set_post_status', 'review_report' => 'reports',
-        'create_shop_item', 'save_shop_item', 'toggle_shop_item' => 'shop',
+        'set_post_status', 'delete_post', 'review_report', 'delete_report' => 'reports',
+        'create_shop_item', 'save_shop_item', 'toggle_shop_item', 'delete_shop_item' => 'shop',
+        'delete_transaction' => 'finance',
         'set_admin_role' => 'admins',
         'logout' => 'dashboard',
         default => null,
@@ -188,6 +239,174 @@ if ($isAdminLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 writeAdminAudit($db, (int)$_SESSION['admin_id'], $newStatus ? 'user_unblocked' : 'user_blocked', 'user', $userId, ['reason' => $reason]);
                 $db->commit();
                 $success = 'Đã cập nhật trạng thái tài khoản và ghi nhật ký.';
+            }
+        }
+    } elseif ($postAction === 'delete_user') {
+        $userId = filter_var($_POST['user_id'] ?? null, FILTER_VALIDATE_INT);
+        if (!$userId) {
+            $error = 'Tài khoản người dùng không hợp lệ.';
+        } else {
+            $uploadPaths = [];
+            try {
+                $db->beginTransaction();
+                $targetQuery = $db->prepare('SELECT id, role, email, profile_photo FROM users WHERE id = :id FOR UPDATE');
+                $targetQuery->execute([':id' => $userId]);
+                $targetUser = $targetQuery->fetch(PDO::FETCH_ASSOC);
+                if (!$targetUser || $targetUser['role'] === 'admin' || $userId === (int)$_SESSION['admin_id']) {
+                    throw new DomainException('Không thể xóa tài khoản admin hoặc tài khoản không tồn tại.');
+                }
+
+                adminCollectUploadPath($uploadPaths, $targetUser['profile_photo'] ?? null);
+                if (adminTableExists($db, 'user_photos')) {
+                    $photos = $db->prepare('SELECT photo_url FROM user_photos WHERE user_id = :id');
+                    $photos->execute([':id' => $userId]);
+                    foreach ($photos->fetchAll(PDO::FETCH_COLUMN) as $photo) {
+                        adminCollectUploadPath($uploadPaths, $photo);
+                    }
+                }
+
+                if (adminTableExists($db, 'posts')) {
+                    $ownedPosts = $db->prepare('SELECT id, image_url FROM posts WHERE user_id = :id');
+                    $ownedPosts->execute([':id' => $userId]);
+                    $postRows = $ownedPosts->fetchAll(PDO::FETCH_ASSOC);
+                    foreach ($postRows as $postRow) {
+                        adminCollectUploadPath($uploadPaths, $postRow['image_url'] ?? null);
+                    }
+                    if ($postRows && adminTableExists($db, 'post_photos')) {
+                        $postIds = array_column($postRows, 'id');
+                        $photoPlaceholders = implode(',', array_fill(0, count($postIds), '?'));
+                        $postPhotos = $db->prepare("SELECT photo_url FROM post_photos WHERE post_id IN ($photoPlaceholders)");
+                        $postPhotos->execute($postIds);
+                        foreach ($postPhotos->fetchAll(PDO::FETCH_COLUMN) as $photo) {
+                            adminCollectUploadPath($uploadPaths, $photo);
+                        }
+                    }
+                }
+
+                if (adminTableExists($db, 'messages')) {
+                    $messages = $db->prepare('SELECT media_url FROM messages WHERE sender_id = :sender OR receiver_id = :receiver');
+                    $messages->execute([':sender' => $userId, ':receiver' => $userId]);
+                    foreach ($messages->fetchAll(PDO::FETCH_COLUMN) as $media) {
+                        adminCollectUploadPath($uploadPaths, $media);
+                    }
+                }
+
+                if (adminTableExists($db, 'parties')) {
+                    $hostedParties = $db->prepare('SELECT id FROM parties WHERE host_id = :id');
+                    $hostedParties->execute([':id' => $userId]);
+                    $partyIds = $hostedParties->fetchAll(PDO::FETCH_COLUMN);
+                    foreach ($partyIds as $partyId) {
+                        foreach (['party_members', 'party_messages', 'party_events'] as $table) {
+                            adminDeleteRowsIfTableExists($db, $table, 'party_id = :party_id', [':party_id' => $partyId]);
+                        }
+                    }
+                    adminDeleteRowsIfTableExists($db, 'parties', 'host_id = :id', [':id' => $userId]);
+                }
+
+                adminDeleteRowsIfTableExists(
+                    $db,
+                    'comment_interactions',
+                    'user_id = :user_id OR comment_id IN (SELECT id FROM post_comments WHERE user_id = :comment_user)',
+                    [':user_id' => $userId, ':comment_user' => $userId]
+                );
+                adminDeleteRowsIfTableExists(
+                    $db,
+                    'post_comments',
+                    'user_id = :comment_user OR post_id IN (SELECT id FROM posts WHERE user_id = :post_user)',
+                    [':comment_user' => $userId, ':post_user' => $userId]
+                );
+                adminDeleteRowsIfTableExists(
+                    $db,
+                    'post_likes',
+                    'user_id = :liker OR post_id IN (SELECT id FROM posts WHERE user_id = :owner)',
+                    [':liker' => $userId, ':owner' => $userId]
+                );
+                adminDeleteRowsIfTableExists(
+                    $db,
+                    'post_hashtags',
+                    'post_id IN (SELECT id FROM posts WHERE user_id = :owner)',
+                    [':owner' => $userId]
+                );
+                adminDeleteRowsIfTableExists(
+                    $db,
+                    'post_photos',
+                    'post_id IN (SELECT id FROM posts WHERE user_id = :owner)',
+                    [':owner' => $userId]
+                );
+                adminDeleteRowsIfTableExists($db, 'posts', 'user_id = :id', [':id' => $userId]);
+
+                adminDeleteRowsIfTableExists(
+                    $db,
+                    'messages',
+                    'sender_id = :sender OR receiver_id = :receiver OR conversation_id IN (SELECT id FROM conversations WHERE user1_id = :user_one OR user2_id = :user_two)',
+                    [':sender' => $userId, ':receiver' => $userId, ':user_one' => $userId, ':user_two' => $userId]
+                );
+                adminDeleteRowsIfTableExists(
+                    $db,
+                    'conversations',
+                    'user1_id = :user_one OR user2_id = :user_two',
+                    [':user_one' => $userId, ':user_two' => $userId]
+                );
+                adminDeleteRowsIfTableExists(
+                    $db,
+                    'chat_calls',
+                    'caller_id = :caller OR receiver_id = :receiver',
+                    [':caller' => $userId, ':receiver' => $userId]
+                );
+                adminDeleteRowsIfTableExists(
+                    $db,
+                    'notifications',
+                    'user_id = :recipient OR sender_id = :sender',
+                    [':recipient' => $userId, ':sender' => $userId]
+                );
+                adminDeleteRowsIfTableExists(
+                    $db,
+                    'blocked_users',
+                    'blocker_id = :blocker OR blocked_id = :blocked',
+                    [':blocker' => $userId, ':blocked' => $userId]
+                );
+                adminDeleteRowsIfTableExists($db, 'user_settings', 'user_id = :id', [':id' => $userId]);
+                adminDeleteRowsIfTableExists($db, 'api_tokens', 'user_id = :id', [':id' => $userId]);
+                adminDeleteRowsIfTableExists($db, 'party_creation_stats', 'user_id = :id', [':id' => $userId]);
+                adminDeleteRowsIfTableExists($db, 'user_items', 'user_id = :id', [':id' => $userId]);
+                adminDeleteRowsIfTableExists($db, 'user_photos', 'user_id = :id', [':id' => $userId]);
+                adminDeleteRowsIfTableExists($db, 'user_interests', 'user_id = :id', [':id' => $userId]);
+                adminDeleteRowsIfTableExists($db, 'follows', 'follower_id = :follower OR followed_id = :followed', [':follower' => $userId, ':followed' => $userId]);
+                adminDeleteRowsIfTableExists($db, 'likes', 'from_user_id = :sender OR to_user_id = :receiver', [':sender' => $userId, ':receiver' => $userId]);
+                adminDeleteRowsIfTableExists($db, 'matches', 'user1_id = :user_one OR user2_id = :user_two', [':user_one' => $userId, ':user_two' => $userId]);
+                adminDeleteRowsIfTableExists($db, 'soul_matches', 'user1_id = :user_one OR user2_id = :user_two', [':user_one' => $userId, ':user_two' => $userId]);
+                adminDeleteRowsIfTableExists($db, 'card_swipes', 'user_id = :user OR target_id = :target', [':user' => $userId, ':target' => $userId]);
+                adminDeleteRowsIfTableExists($db, 'match_queue', 'user_id = :id', [':id' => $userId]);
+                adminDeleteRowsIfTableExists($db, 'voice_match_queue', 'user_id = :id', [':id' => $userId]);
+                adminDeleteRowsIfTableExists($db, 'voice_match_active_users', 'user_id = :id', [':id' => $userId]);
+                adminDeleteRowsIfTableExists(
+                    $db,
+                    'voice_match_sessions',
+                    'user1_id = :user_one OR user2_id = :user_two',
+                    [':user_one' => $userId, ':user_two' => $userId]
+                );
+                adminDeleteRowsIfTableExists($db, 'party_members', 'user_id = :id', [':id' => $userId]);
+                adminDeleteRowsIfTableExists($db, 'party_messages', 'user_id = :id', [':id' => $userId]);
+                adminDeleteRowsIfTableExists($db, 'party_events', 'user_id = :id', [':id' => $userId]);
+                adminDeleteRowsIfTableExists($db, 'otp_codes', 'email = :email', [':email' => $targetUser['email']]);
+                adminDeleteRowsIfTableExists($db, 'processed_sandbox_payments', 'user_id = :id', [':id' => $userId]);
+
+                $db->prepare('DELETE FROM users WHERE id = :id')->execute([':id' => $userId]);
+                writeAdminAudit($db, (int)$_SESSION['admin_id'], 'user_deleted', 'user', $userId, [
+                    'name' => $targetUser['full_name'],
+                    'email' => $targetUser['email'],
+                    'financial_records_retained' => true,
+                ]);
+                $db->commit();
+                adminDeleteUploads($uploadPaths);
+                $success = 'Đã xóa tài khoản và dữ liệu cá nhân liên quan. Giao dịch VPC và nhật ký kiểm toán được giữ lại.';
+            } catch (DomainException $exception) {
+                if ($db->inTransaction()) $db->rollBack();
+                $error = $exception->getMessage();
+            } catch (Throwable $exception) {
+                if ($db->inTransaction()) $db->rollBack();
+                error_log('Admin user deletion failed: ' . $exception->getMessage());
+                $error = 'Không thể xóa tài khoản. Chưa có thay đổi nào được lưu.';
             }
         }
     } elseif ($postAction === 'adjust_coins') {
@@ -307,6 +526,52 @@ if ($isAdminLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST') {
         } else {
             $error = 'Bài viết hoặc trạng thái không hợp lệ.';
         }
+    } elseif ($postAction === 'delete_post') {
+        $postId = filter_var($_POST['post_id'] ?? null, FILTER_VALIDATE_INT);
+        if (!$postId) {
+            $error = 'Bài viết không hợp lệ.';
+        } else {
+            $uploadPaths = [];
+            try {
+                $db->beginTransaction();
+                $postQuery = $db->prepare('SELECT id, user_id, content, image_url FROM posts WHERE id = :id FOR UPDATE');
+                $postQuery->execute([':id' => $postId]);
+                $post = $postQuery->fetch(PDO::FETCH_ASSOC);
+                if (!$post) {
+                    throw new DomainException('Không tìm thấy bài đăng.');
+                }
+
+                adminCollectUploadPath($uploadPaths, $post['image_url'] ?? null);
+                if (adminTableExists($db, 'post_photos')) {
+                    $photos = $db->prepare('SELECT photo_url FROM post_photos WHERE post_id = :id');
+                    $photos->execute([':id' => $postId]);
+                    foreach ($photos->fetchAll(PDO::FETCH_COLUMN) as $photo) {
+                        adminCollectUploadPath($uploadPaths, $photo);
+                    }
+                }
+
+                adminDeleteRowsIfTableExists($db, 'comment_interactions', 'comment_id IN (SELECT id FROM post_comments WHERE post_id = :id)', [':id' => $postId]);
+                adminDeleteRowsIfTableExists($db, 'post_comments', 'post_id = :id', [':id' => $postId]);
+                adminDeleteRowsIfTableExists($db, 'post_likes', 'post_id = :id', [':id' => $postId]);
+                adminDeleteRowsIfTableExists($db, 'post_hashtags', 'post_id = :id', [':id' => $postId]);
+                adminDeleteRowsIfTableExists($db, 'post_photos', 'post_id = :id', [':id' => $postId]);
+                $db->prepare('DELETE FROM posts WHERE id = :id')->execute([':id' => $postId]);
+                writeAdminAudit($db, (int)$_SESSION['admin_id'], 'post_deleted', 'post', $postId, [
+                    'author_id' => (int)$post['user_id'],
+                    'content_preview' => mb_substr((string)($post['content'] ?? ''), 0, 120),
+                ]);
+                $db->commit();
+                adminDeleteUploads($uploadPaths);
+                $success = 'Đã xóa vĩnh viễn bài đăng và ảnh liên quan.';
+            } catch (DomainException $exception) {
+                if ($db->inTransaction()) $db->rollBack();
+                $error = $exception->getMessage();
+            } catch (Throwable $exception) {
+                if ($db->inTransaction()) $db->rollBack();
+                error_log('Admin post deletion failed: ' . $exception->getMessage());
+                $error = 'Không thể xóa bài đăng. Chưa có thay đổi nào được lưu.';
+            }
+        }
     } elseif ($postAction === 'review_report') {
         $reportId = filter_var($_POST['report_id'] ?? null, FILTER_VALIDATE_INT);
         $status = $_POST['status'] ?? '';
@@ -336,6 +601,39 @@ if ($isAdminLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 writeAdminAudit($db, (int)$_SESSION['admin_id'], 'report_' . $status, 'report', $reportId, ['note' => $note]);
                 $db->commit();
                 $success = 'Đã cập nhật kết quả xử lý tố cáo.';
+            }
+        }
+    } elseif ($postAction === 'delete_report') {
+        $reportId = filter_var($_POST['report_id'] ?? null, FILTER_VALIDATE_INT);
+        if (!$reportId) {
+            $error = 'Tố cáo không hợp lệ.';
+        } else {
+            try {
+                $db->beginTransaction();
+                $reportQuery = $db->prepare('SELECT * FROM reports WHERE id = :id FOR UPDATE');
+                $reportQuery->execute([':id' => $reportId]);
+                $report = $reportQuery->fetch(PDO::FETCH_ASSOC);
+                if (!$report) {
+                    throw new DomainException('Không tìm thấy tố cáo.');
+                }
+
+                $db->prepare('DELETE FROM reports WHERE id = :id')->execute([':id' => $reportId]);
+                writeAdminAudit($db, (int)$_SESSION['admin_id'], 'report_deleted', 'report', $reportId, [
+                    'reporter_id' => (int)$report['reporter_id'],
+                    'target_type' => $report['target_type'],
+                    'target_id' => (int)$report['target_id'],
+                    'reason' => $report['reason'],
+                    'status' => $report['status'],
+                ]);
+                $db->commit();
+                $success = 'Đã xóa tố cáo; thông tin xử lý được lưu trong nhật ký kiểm toán.';
+            } catch (DomainException $exception) {
+                if ($db->inTransaction()) $db->rollBack();
+                $error = $exception->getMessage();
+            } catch (Throwable $exception) {
+                if ($db->inTransaction()) $db->rollBack();
+                error_log('Admin report deletion failed: ' . $exception->getMessage());
+                $error = 'Không thể xóa tố cáo. Chưa có thay đổi nào được lưu.';
             }
         }
     } elseif ($postAction === 'create_shop_item') {
@@ -394,6 +692,90 @@ if ($isAdminLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $success = 'Đã cập nhật trạng thái vật phẩm shop.';
         } else {
             $error = 'ID vật phẩm không hợp lệ.';
+        }
+    } elseif ($postAction === 'delete_shop_item') {
+        $itemId = filter_var($_POST['item_id'] ?? null, FILTER_VALIDATE_INT);
+        if (!$itemId) {
+            $error = 'ID vật phẩm không hợp lệ.';
+        } else {
+            try {
+                $db->beginTransaction();
+                $itemQuery = $db->prepare('SELECT id, name, type, image_url, price_coins FROM shop_items WHERE id = :id FOR UPDATE');
+                $itemQuery->execute([':id' => $itemId]);
+                $item = $itemQuery->fetch(PDO::FETCH_ASSOC);
+                if (!$item) {
+                    throw new DomainException('Không tìm thấy vật phẩm.');
+                }
+
+                $hasOwners = false;
+                if (adminTableExists($db, 'user_items')) {
+                    $ownerQuery = $db->prepare('SELECT 1 FROM user_items WHERE item_id = :id LIMIT 1');
+                    $ownerQuery->execute([':id' => $itemId]);
+                    $hasOwners = (bool)$ownerQuery->fetchColumn();
+                }
+                foreach (['active_profile_frame_id', 'active_party_frame_id'] as $column) {
+                    if (adminColumnExists($db, 'users', $column)) {
+                        $equippedQuery = $db->prepare("SELECT 1 FROM users WHERE `$column` = :id LIMIT 1");
+                        $equippedQuery->execute([':id' => $itemId]);
+                        $hasOwners = $hasOwners || (bool)$equippedQuery->fetchColumn();
+                    }
+                }
+                if ($hasOwners) {
+                    throw new DomainException('Vật phẩm đã được mua hoặc đang trang bị; hãy dùng nút Ẩn để ngừng bán mà không ảnh hưởng người dùng.');
+                }
+
+                $db->prepare('DELETE FROM shop_items WHERE id = :id')->execute([':id' => $itemId]);
+                writeAdminAudit($db, (int)$_SESSION['admin_id'], 'shop_item_deleted', 'shop_item', $itemId, [
+                    'name' => $item['name'],
+                    'type' => $item['type'],
+                    'image_url' => $item['image_url'],
+                    'price_coins' => (int)$item['price_coins'],
+                ]);
+                $db->commit();
+                $success = 'Đã xóa vật phẩm chưa được người dùng sở hữu.';
+            } catch (DomainException $exception) {
+                if ($db->inTransaction()) $db->rollBack();
+                $error = $exception->getMessage();
+            } catch (Throwable $exception) {
+                if ($db->inTransaction()) $db->rollBack();
+                error_log('Admin shop item deletion failed: ' . $exception->getMessage());
+                $error = 'Không thể xóa vật phẩm. Chưa có thay đổi nào được lưu.';
+            }
+        }
+    } elseif ($postAction === 'delete_transaction') {
+        $transactionId = filter_var($_POST['transaction_id'] ?? null, FILTER_VALIDATE_INT);
+        if (!$transactionId) {
+            $error = 'Giao dịch không hợp lệ.';
+        } else {
+            try {
+                $db->beginTransaction();
+                $transactionQuery = $db->prepare('SELECT * FROM transactions WHERE id = :id FOR UPDATE');
+                $transactionQuery->execute([':id' => $transactionId]);
+                $transaction = $transactionQuery->fetch(PDO::FETCH_ASSOC);
+                if (!$transaction) {
+                    throw new DomainException('Không tìm thấy giao dịch.');
+                }
+
+                $db->prepare('DELETE FROM transactions WHERE id = :id')->execute([':id' => $transactionId]);
+                writeAdminAudit($db, (int)$_SESSION['admin_id'], 'transaction_deleted', 'transaction', $transactionId, [
+                    'user_id' => (int)$transaction['user_id'],
+                    'amount_usd' => $transaction['amount_usd'],
+                    'coins' => (int)$transaction['coins'],
+                    'gateway' => $transaction['gateway'],
+                    'status' => $transaction['status'],
+                    'created_at' => $transaction['created_at'],
+                    'coin_balance_changed' => false,
+                ]);
+                $db->commit();
+                $success = 'Đã xóa bản ghi khỏi danh sách giao dịch; số dư người dùng và sổ cái VPC không thay đổi.';
+            } catch (DomainException $exception) {
+                if ($db->inTransaction()) $db->rollBack();
+                $error = $exception->getMessage();
+            } catch (Throwable $exception) {
+                if ($db->inTransaction()) $db->rollBack();
+                error_log('Admin transaction deletion failed: ' . $exception->getMessage());
+                $error = 'Không thể xóa giao dịch. Chưa có thay đổi nào được lưu.';
+            }
         }
     } elseif ($postAction === 'set_admin_role') {
         $userId = filter_var($_POST['user_id'] ?? null, FILTER_VALIDATE_INT);
@@ -904,14 +1286,23 @@ if ($isAdminLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST') {
                                             <button onclick='openEditModal(<?= json_encode($u) ?>)' class="px-2.5 py-1.5 bg-yellow-500 text-white rounded text-xs font-semibold hover:bg-yellow-600 transition" title="Sửa">
                                                 <i class="fa-solid fa-pen"></i>
                                             </button>
-                                            <?php if ($u['role'] !== 'admin'): ?><form method="POST" class="inline" onsubmit="return confirm('Bạn có chắc chắn muốn thay đổi trạng thái tài khoản này?');">
+                                            <?php if ($u['role'] !== 'admin' && adminHasPermission($adminRole, 'users')): ?><form method="POST" class="inline" onsubmit="return confirm('Bạn có chắc chắn muốn thay đổi trạng thái tài khoản này?');">
                                                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
                                                 <input type="hidden" name="action" value="set_user_status">
                                                 <input type="hidden" name="user_id" value="<?= $u['id'] ?>">
                                                 <input type="hidden" name="is_active" value="<?= $u['is_active'] ? 0 : 1 ?>">
                                                 <input type="text" name="reason" required maxlength="500" placeholder="Lý do khóa/mở" class="w-24 px-2 py-1 border rounded text-xs">
                                                 <button type="submit" class="px-2.5 py-1.5 text-white rounded text-xs font-semibold shadow-sm transition <?= $toggleClass ?>" title="<?= $toggleText ?>"><?= $toggleText ?></button>
-                                            </form><?php else: ?><span class="text-xs text-gray-400">Admin protected</span><?php endif; ?>
+                                            </form>
+                                            <form method="POST" class="inline" onsubmit="return confirm('XÓA VĨNH VIỄN tài khoản #<?= (int)$u['id'] ?> và dữ liệu cá nhân liên quan? Giao dịch VPC và nhật ký kiểm toán sẽ được giữ lại. Thao tác này không thể hoàn tác.');">
+                                                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                                                <input type="hidden" name="action" value="delete_user">
+                                                <input type="hidden" name="user_id" value="<?= (int)$u['id'] ?>">
+                                                <button type="submit" class="px-2.5 py-1.5 bg-gray-900 text-white rounded text-xs font-semibold shadow-sm hover:bg-black transition" title="Xóa vĩnh viễn người dùng">
+                                                    <i class="fa-solid fa-trash"></i> Xóa
+                                                </button>
+                                            </form>
+                                            <?php else: ?><span class="text-xs text-gray-400"><?= $u['role'] === 'admin' ? 'Admin protected' : 'Không có quyền' ?></span><?php endif; ?>
                                         </td>
                                     </tr>
                                     <?php endforeach; endif; ?>
@@ -973,13 +1364,25 @@ if ($isAdminLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST') {
                                         </td>
                                         <td class="py-4 px-4 md:px-6 text-gray-500 text-xs"><?= $p['created_at'] ?></td>
                                         <td class="py-4 px-4 md:px-6 text-center">
-                                            <form method="POST" onsubmit="return confirm('Bạn có chắc chắn muốn xóa bài đăng này?');">
+                                            <?php if (adminHasPermission($adminRole, 'reports')): ?>
+                                            <div class="flex justify-center items-center gap-2">
+                                            <form method="POST">
                                                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
                                                 <input type="hidden" name="action" value="set_post_status">
                                                 <input type="hidden" name="post_id" value="<?= $p['id'] ?>">
                                                 <input type="hidden" name="status" value="<?= $p['status'] ? 0 : 1 ?>">
                                                 <button type="submit" class="px-3 py-1.5 <?= $p['status'] ? 'bg-red-500' : 'bg-green-600' ?> text-white rounded text-xs font-semibold shadow-sm"><?= $p['status'] ? 'Ẩn Bài' : 'Khôi Phục' ?></button>
                                             </form>
+                                            <form method="POST" onsubmit="return confirm('Xóa vĩnh viễn bài đăng #<?= (int)$p['id'] ?> cùng tất cả bình luận và hình ảnh? Thao tác này không thể hoàn tác.');">
+                                                <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                                                <input type="hidden" name="action" value="delete_post">
+                                                <input type="hidden" name="post_id" value="<?= (int)$p['id'] ?>">
+                                                <button type="submit" class="px-3 py-1.5 bg-gray-900 text-white rounded text-xs font-semibold shadow-sm hover:bg-black">Xóa</button>
+                                            </form>
+                                            </div>
+                                            <?php else: ?>
+                                                <span class="text-xs text-gray-400">Không có quyền</span>
+                                            <?php endif; ?>
                                         </td>
                                     </tr>
                                     <?php endforeach; endif; ?>
@@ -1079,6 +1482,14 @@ if ($isAdminLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST') {
                                             <?php if (!in_array($r['status'], ['pending', 'reviewing'], true)): ?>
                                                 <span class="text-xs text-gray-400 italic">Đã xử lý</span>
                                             <?php endif; ?>
+                                            <?php if (adminHasPermission($adminRole, 'reports')): ?>
+                                                <form method="POST" class="inline" onsubmit="return confirm('Xóa vĩnh viễn tố cáo #<?= (int)$r['id'] ?>? Thông tin sẽ được lưu vào nhật ký kiểm toán.');">
+                                                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                                                    <input type="hidden" name="action" value="delete_report">
+                                                    <input type="hidden" name="report_id" value="<?= (int)$r['id'] ?>">
+                                                    <button type="submit" class="px-2 py-1 bg-gray-900 text-white rounded text-xs hover:bg-black">Xóa</button>
+                                                </form>
+                                            <?php endif; ?>
                                         </td>
                                     </tr>
                                     <?php endforeach; endif; ?>
@@ -1168,11 +1579,12 @@ if ($isAdminLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST') {
                                             <th class="py-3 px-4 md:px-6">Cổng Thanh Toán</th>
                                             <th class="py-3 px-4 md:px-6">Trạng Thái</th>
                                             <th class="py-3 px-4 md:px-6">Thời Gian</th>
+                                            <th class="py-3 px-4 md:px-6 text-center">Thao Tác</th>
                                         </tr>
                                     </thead>
                                     <tbody class="divide-y divide-gray-200 text-sm">
                                         <?php if (empty($transactions)): ?>
-                                            <tr><td colspan="7" class="py-6 text-center text-gray-400">Không có giao dịch nạp tiền nào.</td></tr>
+                                            <tr><td colspan="8" class="py-6 text-center text-gray-400">Không có giao dịch nạp tiền nào.</td></tr>
                                         <?php else: foreach ($transactions as $tx): ?>
                                         <tr class="hover:bg-gray-50 transition">
                                             <td class="py-4 px-4 md:px-6 text-gray-500">#TX-<?= $tx['id'] ?></td>
@@ -1185,6 +1597,16 @@ if ($isAdminLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST') {
                                             <td class="py-4 px-4 md:px-6 text-gray-700"><?= htmlspecialchars($tx['gateway']) ?></td>
                                             <td class="py-4 px-4 md:px-6"><span class="px-2.5 py-1 <?= $tx['status'] === 'completed' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800' ?> rounded-full text-xs font-semibold"><?= htmlspecialchars($tx['status']) ?></span></td>
                                             <td class="py-4 px-4 md:px-6 text-gray-500 text-xs"><?= $tx['created_at'] ?></td>
+                                            <td class="py-4 px-4 md:px-6 text-center">
+                                                <?php if (adminHasPermission($adminRole, 'finance')): ?>
+                                                <form method="POST" onsubmit="return confirm('Xóa bản ghi giao dịch #TX-<?= (int)$tx['id'] ?> khỏi lịch sử? Số dư VPC không thay đổi, không có khoản hoàn tiền nào được thực hiện và chi tiết vẫn được ghi trong audit.');">
+                                                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                                                    <input type="hidden" name="action" value="delete_transaction">
+                                                    <input type="hidden" name="transaction_id" value="<?= (int)$tx['id'] ?>">
+                                                    <button type="submit" class="px-2.5 py-1.5 bg-gray-900 text-white rounded text-xs font-semibold hover:bg-black">Xóa</button>
+                                                </form>
+                                                <?php endif; ?>
+                                            </td>
                                         </tr>
                                         <?php endforeach; endif; ?>
                                     </tbody>
@@ -1244,7 +1666,7 @@ if ($isAdminLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST') {
                             <button class="px-4 py-2 rounded bg-red-500 text-white">Thêm vật phẩm</button>
                         </form>
                         <table class="w-full text-left min-w-[850px]">
-                            <thead class="bg-gray-50 text-xs uppercase text-gray-500"><tr><th class="p-3">ID</th><th class="p-3">Tên</th><th class="p-3">Loại</th><th class="p-3">Giá VPC</th><th class="p-3">Trạng thái</th><th class="p-3">Lưu</th></tr></thead>
+                            <thead class="bg-gray-50 text-xs uppercase text-gray-500"><tr><th class="p-3">ID</th><th class="p-3">Tên</th><th class="p-3">Loại</th><th class="p-3">Giá VPC</th><th class="p-3">Trạng thái</th><th class="p-3">Lưu</th><th class="p-3">Thao tác</th></tr></thead>
                             <tbody class="divide-y">
                             <?php foreach ($shopItems as $item): ?>
                                 <tr>
@@ -1268,6 +1690,14 @@ if ($isAdminLoggedIn && $_SERVER['REQUEST_METHOD'] === 'POST') {
                                         </form>
                                     </td>
                                     <td class="p-3"><button form="shop-edit-<?= (int)$item['id'] ?>" class="px-3 py-1 rounded bg-blue-600 text-white text-xs">Lưu</button></td>
+                                    <td class="p-3">
+                                        <form method="POST" onsubmit="return confirm('Xóa vĩnh viễn vật phẩm #<?= (int)$item['id'] ?> khỏi catalog? Vật phẩm đã mua hoặc đang trang bị sẽ không thể xóa.');">
+                                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+                                            <input type="hidden" name="action" value="delete_shop_item">
+                                            <input type="hidden" name="item_id" value="<?= (int)$item['id'] ?>">
+                                            <button type="submit" class="px-3 py-1 rounded bg-gray-900 text-white text-xs hover:bg-black">Xóa</button>
+                                        </form>
+                                    </td>
                                 </tr>
                             <?php endforeach; ?>
                             </tbody>
