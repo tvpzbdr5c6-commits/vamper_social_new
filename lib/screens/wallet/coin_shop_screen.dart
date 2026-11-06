@@ -9,6 +9,7 @@ import 'package:in_app_purchase/in_app_purchase.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../app/theme/app_colors.dart';
 import '../../controllers/auth_controller.dart';
+import '../../core/constants/api_constants.dart';
 import 'store_screen.dart';
 
 class CoinShopScreen extends StatefulWidget {
