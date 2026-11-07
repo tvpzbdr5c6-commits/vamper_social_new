@@ -10,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../app/theme/app_colors.dart';
 import '../../controllers/auth_controller.dart';
 import '../../core/constants/api_constants.dart';
+import '../../widgets/vpc_coin_icon.dart';
 import 'store_screen.dart';
 
 class CoinShopScreen extends StatefulWidget {
@@ -274,7 +275,7 @@ class _CoinShopScreenState extends State<CoinShopScreen> {
                       color: Colors.white.withValues(alpha: 0.2),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.monetization_on, color: Colors.amber, size: 40),
+                    child: const VpcCoinIcon(size: 40),
                   ),
                 ],
               ),
@@ -438,7 +439,7 @@ class _CoinShopScreenState extends State<CoinShopScreen> {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              const Icon(Icons.monetization_on, color: Colors.amber, size: 44),
+                              const VpcCoinIcon(size: 44),
                               const SizedBox(height: 12),
                               Text('${pkg['coins']} Coins', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
                               const SizedBox(height: 4),

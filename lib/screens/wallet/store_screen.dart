@@ -3,6 +3,7 @@ import 'package:get/get.dart';
 import '../../app/theme/app_colors.dart';
 import '../../controllers/auth_controller.dart';
 import '../../core/constants/api_constants.dart';
+import '../../widgets/vpc_coin_icon.dart';
 import '../../widgets/profile_frame_style.dart';
 import 'coin_shop_screen.dart';
 
@@ -279,11 +280,7 @@ class _StoreScreenState extends State<StoreScreen> {
                 children: [
                   Row(
                     children: [
-                      const Icon(
-                        Icons.monetization_on,
-                        color: Colors.amber,
-                        size: 24,
-                      ),
+                      const VpcCoinIcon(size: 24),
                       const SizedBox(width: 8),
                       Obx(
                         () => Text(
@@ -454,11 +451,7 @@ class _StoreScreenState extends State<StoreScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(
-                        Icons.monetization_on,
-                        color: Colors.amber,
-                        size: 14,
-                      ),
+                      const VpcCoinIcon(size: 14),
                       const SizedBox(width: 4),
                       Text(
                         '$price VPC',

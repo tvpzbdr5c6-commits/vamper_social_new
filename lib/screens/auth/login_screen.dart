@@ -7,6 +7,7 @@ import '../../widgets/gradient_button.dart';
 import '../../widgets/vamper_logo.dart';
 import '../../widgets/loading_overlay.dart';
 import '../../controllers/auth_controller.dart';
+import 'forgot_password_screen.dart';
 import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -194,7 +195,7 @@ class _LoginScreenState extends State<LoginScreen> {
                             alignment: Alignment.centerRight,
                             child: TextButton(
                               onPressed: () {
-                                // TODO: Forgot password
+                                Get.to(() => const ForgotPasswordScreen());
                               },
                               style: TextButton.styleFrom(
                                 foregroundColor: AppColors.primary,

@@ -51,41 +51,58 @@ function ensureGiftTables(PDO $db): void
         KEY idx_blocked (blocked_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
+    $gifts = [
+        ['rose', 'Rose', '🌹', 10],
+        ['heart', 'Heart', '💖', 25],
+        ['coffee', 'Coffee', '☕', 50],
+        ['teddy', 'Teddy bear', '🧸', 100],
+        ['diamond', 'Diamond', '💎', 250],
+        ['crown', 'Royal crown', '👑', 500],
+        ['rocket', 'Rocket', '🚀', 1000],
+        ['tulip', 'Tulip', '🌷', 15],
+        ['sunflower', 'Sunflower', '🌻', 20],
+        ['lollipop', 'Lollipop', '🍭', 20],
+        ['love_letter', 'Love letter', '💌', 35],
+        ['music_note', 'Music note', '🎵', 35],
+        ['bubble_tea', 'Bubble tea', '🧋', 40],
+        ['star', 'Shining star', '⭐', 50],
+        ['pizza', 'Pizza slice', '🍕', 60],
+        ['bouquet', 'Flower bouquet', '💐', 75],
+        ['butterfly', 'Butterfly', '🦋', 80],
+        ['cat', 'Cute cat', '🐱', 80],
+        ['dog', 'Puppy', '🐶', 80],
+        ['cupcake', 'Cupcake', '🧁', 90],
+        ['chocolate', 'Chocolate box', '🍫', 100],
+        ['cake', 'Birthday cake', '🎂', 120],
+        ['panda', 'Panda', '🐼', 150],
+        ['fireworks', 'Fireworks', '🎆', 180],
+        ['magic_wand', 'Magic wand', '🪄', 200],
+        ['gift_box', 'Gift box', '🎁', 250],
+        ['unicorn', 'Unicorn', '🦄', 350],
+        ['trophy', 'Golden trophy', '🏆', 400],
+        ['meteor', 'Meteor', '☄️', 500],
+        ['ring', 'Diamond ring', '💍', 600],
+        ['sports_car', 'Sports car', '🏎️', 750],
+        ['castle', 'Dream castle', '🏰', 800],
+        ['dragon', 'Dragon', '🐉', 1000],
+        ['galaxy', 'Galaxy', '🌌', 1200],
+        ['treasure', 'Treasure chest', '💰', 1500],
+        ['island', 'Private island', '🏝️', 2000],
+    ];
     $seed = $db->prepare(
         'INSERT IGNORE INTO gift_catalog
             (gift_key, name, emoji, price_coins, sort_order, is_active, created_at)
-         VALUES
-            (:rose_key, :rose_name, :rose_emoji, 10, 10, 1, UTC_TIMESTAMP()),
-            (:heart_key, :heart_name, :heart_emoji, 25, 20, 1, UTC_TIMESTAMP()),
-            (:coffee_key, :coffee_name, :coffee_emoji, 50, 30, 1, UTC_TIMESTAMP()),
-            (:teddy_key, :teddy_name, :teddy_emoji, 100, 40, 1, UTC_TIMESTAMP()),
-            (:diamond_key, :diamond_name, :diamond_emoji, 250, 50, 1, UTC_TIMESTAMP()),
-            (:crown_key, :crown_name, :crown_emoji, 500, 60, 1, UTC_TIMESTAMP()),
-            (:rocket_key, :rocket_name, :rocket_emoji, 1000, 70, 1, UTC_TIMESTAMP())'
+         VALUES (:gift_key, :name, :emoji, :price, :sort_order, 1, UTC_TIMESTAMP())'
     );
-    $seed->execute([
-        ':rose_key' => 'rose',
-        ':rose_name' => 'Rose',
-        ':rose_emoji' => '🌹',
-        ':heart_key' => 'heart',
-        ':heart_name' => 'Heart',
-        ':heart_emoji' => '💖',
-        ':coffee_key' => 'coffee',
-        ':coffee_name' => 'Coffee',
-        ':coffee_emoji' => '☕',
-        ':teddy_key' => 'teddy',
-        ':teddy_name' => 'Teddy bear',
-        ':teddy_emoji' => '🧸',
-        ':diamond_key' => 'diamond',
-        ':diamond_name' => 'Diamond',
-        ':diamond_emoji' => '💎',
-        ':crown_key' => 'crown',
-        ':crown_name' => 'Royal crown',
-        ':crown_emoji' => '👑',
-        ':rocket_key' => 'rocket',
-        ':rocket_name' => 'Rocket',
-        ':rocket_emoji' => '🚀',
-    ]);
+    foreach ($gifts as $index => [$key, $name, $emoji, $price]) {
+        $seed->execute([
+            ':gift_key' => $key,
+            ':name' => $name,
+            ':emoji' => $emoji,
+            ':price' => $price,
+            ':sort_order' => ($index + 1) * 10,
+        ]);
+    }
 }
 
 function sendGiftTransaction(

@@ -77,6 +77,40 @@ class AuthService {
     }
   }
 
+  Future<Map<String, dynamic>> requestPasswordReset({required String email}) async {
+    final response = await _apiService.post(
+      ApiConstants.requestPasswordReset,
+      data: {'email': email.trim().toLowerCase()},
+    );
+    if (response.data is Map && response.data['success'] == true) {
+      return Map<String, dynamic>.from(response.data as Map);
+    }
+    throw response.data is Map
+        ? response.data['message'] ?? 'Unable to send a reset code.'
+        : 'Unable to send a reset code.';
+  }
+
+  Future<Map<String, dynamic>> resetPassword({
+    required String email,
+    required String code,
+    required String newPassword,
+  }) async {
+    final response = await _apiService.post(
+      ApiConstants.resetPassword,
+      data: {
+        'email': email.trim().toLowerCase(),
+        'code': code.trim(),
+        'new_password': newPassword,
+      },
+    );
+    if (response.data is Map && response.data['success'] == true) {
+      return Map<String, dynamic>.from(response.data as Map);
+    }
+    throw response.data is Map
+        ? response.data['message'] ?? 'Unable to reset the password.'
+        : 'Unable to reset the password.';
+  }
+
   // Verify OTP
   Future<Map<String, dynamic>> verifyOtp({
     required String email,

@@ -8,6 +8,7 @@ import '../../controllers/discovery_controller.dart';
 import '../../controllers/feed_controller.dart';
 import '../../controllers/match_hub_controller.dart';
 import '../../widgets/post_card.dart';
+import '../../widgets/vpc_coin_icon.dart';
 import '../profile/edit_profile_screen.dart';
 import '../profile/profile_preview_screen.dart';
 import '../auth/login_screen.dart';
@@ -98,11 +99,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   child: Row(
                     children: [
-                      const Icon(
-                        Icons.monetization_on,
-                        color: Colors.amber,
-                        size: 20,
-                      ),
+                      const VpcCoinIcon(size: 20),
                       const SizedBox(width: 4),
                       Text(
                         coins.toString(),
@@ -129,7 +126,25 @@ class _HomeScreenState extends State<HomeScreen> {
             const SizedBox(width: 8),
           ],
         ),
-        body: _screens[_currentIndex],
+        body: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 240),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          transitionBuilder: (child, animation) => FadeTransition(
+            opacity: animation,
+            child: SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(0.015, 0),
+                end: Offset.zero,
+              ).animate(animation),
+              child: child,
+            ),
+          ),
+          child: KeyedSubtree(
+            key: ValueKey(_currentIndex),
+            child: _screens[_currentIndex],
+          ),
+        ),
         floatingActionButton: AnimatedSlide(
           duration: const Duration(milliseconds: 200),
           offset: _isFabVisible ? Offset.zero : const Offset(0, 2),
@@ -255,8 +270,13 @@ class _NavBarItem extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+        padding: EdgeInsets.symmetric(
+          horizontal: MediaQuery.sizeOf(context).width < 400 ? 7 : 12,
+          vertical: 8,
+        ),
         decoration: BoxDecoration(
           gradient: isActive ? AppColors.primaryGradient : null,
           borderRadius: BorderRadius.circular(12),
@@ -267,20 +287,36 @@ class _NavBarItem extends StatelessWidget {
             Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(
-                  isActive ? activeIcon : icon,
-                  color: isActive ? Colors.white : AppColors.textLight,
-                  size: 24,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  transitionBuilder: (child, animation) => ScaleTransition(
+                    scale: animation,
+                    child: FadeTransition(opacity: animation, child: child),
+                  ),
+                  child: Icon(
+                    isActive ? activeIcon : icon,
+                    key: ValueKey(isActive),
                     color: isActive ? Colors.white : AppColors.textLight,
+                    size: 23,
                   ),
                 ),
+                if (MediaQuery.sizeOf(context).width >= 360) ...[
+                  const SizedBox(height: 4),
+                  AnimatedDefaultTextStyle(
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOut,
+                    style: TextStyle(
+                      fontSize: MediaQuery.sizeOf(context).width < 400 ? 10 : 11,
+                      fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                      color: isActive ? Colors.white : AppColors.textLight,
+                    ),
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
               ],
             ),
             if (hasRedDot && !isActive)
@@ -658,170 +694,485 @@ class ProfileTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final AuthController authController = Get.find<AuthController>();
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 640;
+        final horizontalPadding = compact ? 16.0 : 32.0;
+        final maxContentWidth = constraints.maxWidth >= 1000 ? 960.0 : 720.0;
 
-    return FadeIn(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          children: [
-            Obx(() {
-              final user = authController.currentUser.value;
-              return UserAvatarWithFrame(
-                photoUrl: user?.profilePhoto,
-                frameCode: user?.activeProfileFrameCode,
-                size: 110,
-              );
-            }),
-            const SizedBox(height: 16),
-            Obx(
-              () => Text(
-                authController.currentUser.value?.fullName ?? 'User',
-                style: const TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Obx(
-              () => Text(
-                authController.currentUser.value?.email ?? '',
-                style: const TextStyle(
-                  fontSize: 14,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
-            OutlinedButton.icon(
-              onPressed: () {
-                final userId = authController.currentUser.value?.id;
-                if (userId != null) {
-                  Get.to(() => ProfilePreviewScreen(userId: userId));
-                }
-              },
-              icon: const Icon(Icons.remove_red_eye_outlined, size: 18),
-              label: const Text('View Profile'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.primary,
-                side: const BorderSide(color: AppColors.primary),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24,
-                  vertical: 12,
-                ),
-              ),
-            ),
-            const SizedBox(height: 32),
-            _ProfileMenuItem(
-              icon: Icons.card_giftcard,
-              title: 'Gift Collection 🎁',
-              onTap: () => Get.to(() => const GiftCollectionScreen()),
-            ),
-            _ProfileMenuItem(
-              icon: Icons.storefront,
-              title: 'Item Store 🛍️',
-              onTap: () => Get.to(() => const StoreScreen()),
-            ),
-            _ProfileMenuItem(
-              icon: Icons.settings,
-              title: 'Settings',
-              onTap: () => Get.to(() => const SettingsScreen()),
-            ),
-            _ProfileMenuItem(
-              icon: Icons.help_outline,
-              title: 'Help & Support',
-              onTap: () {},
-            ),
-            _ProfileMenuItem(
-              icon: Icons.logout,
-              title: 'Logout',
-              iconColor: AppColors.error,
-              titleColor: AppColors.error,
-              onTap: () {
-                Get.dialog(
-                  AlertDialog(
-                    title: const Text('Logout'),
-                    content: const Text('Are you sure you want to logout?'),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Get.back(),
-                        child: const Text('Cancel'),
+        return SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          padding: EdgeInsets.symmetric(
+            horizontal: horizontalPadding,
+            vertical: compact ? 20 : 32,
+          ),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: maxContentWidth),
+              child: Obx(() {
+                final user = authController.currentUser.value;
+                final profileInfo = Column(
+                  crossAxisAlignment: compact
+                      ? CrossAxisAlignment.center
+                      : CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      user?.fullName ?? 'User',
+                      textAlign: compact ? TextAlign.center : TextAlign.start,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: compact ? 25 : 30,
+                        fontWeight: FontWeight.w800,
                       ),
-                      TextButton(
-                        onPressed: () {
-                          authController.logout();
-                          Get.offAll(() => const LoginScreen());
-                        },
-                        child: const Text(
-                          'Logout',
-                          style: TextStyle(color: AppColors.error),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      user?.email ?? '',
+                      textAlign: compact ? TextAlign.center : TextAlign.start,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Wrap(
+                      alignment: compact
+                          ? WrapAlignment.center
+                          : WrapAlignment.start,
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _ProfileBadge(
+                          icon: user?.isVerified == true
+                              ? Icons.verified_rounded
+                              : Icons.person_outline_rounded,
+                          label: user?.isVerified == true
+                              ? 'Verified'
+                              : 'Vamper member',
+                        ),
+                        if ((user?.location ?? '').trim().isNotEmpty)
+                          _ProfileBadge(
+                            icon: Icons.location_on_outlined,
+                            label: user!.location!,
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                    Wrap(
+                      alignment: compact
+                          ? WrapAlignment.center
+                          : WrapAlignment.start,
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            final userId = user?.id;
+                            if (userId != null) {
+                              Get.to(() => ProfilePreviewScreen(userId: userId));
+                            }
+                          },
+                          icon: const Icon(Icons.visibility_outlined, size: 18),
+                          label: const Text('View profile'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            side: const BorderSide(color: Colors.white70),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        ),
+                        FilledButton.icon(
+                          onPressed: () => Get.to(
+                            () => const EditProfileScreen(),
+                          ),
+                          icon: const Icon(Icons.edit_outlined, size: 18),
+                          label: const Text('Edit profile'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: AppColors.primaryDark,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                );
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    FadeInDown(
+                      duration: const Duration(milliseconds: 380),
+                      child: Container(
+                        width: double.infinity,
+                        padding: EdgeInsets.all(compact ? 20 : 28),
+                        decoration: BoxDecoration(
+                          gradient: AppColors.primaryGradient,
+                          borderRadius: BorderRadius.circular(26),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppColors.primary.withValues(alpha: 0.2),
+                              blurRadius: 24,
+                              offset: const Offset(0, 10),
+                            ),
+                          ],
+                        ),
+                        child: Flex(
+                          direction: compact ? Axis.vertical : Axis.horizontal,
+                          crossAxisAlignment: compact
+                              ? CrossAxisAlignment.center
+                              : CrossAxisAlignment.start,
+                          children: [
+                            UserAvatarWithFrame(
+                              photoUrl: user?.profilePhoto,
+                              frameCode: user?.activeProfileFrameCode,
+                              size: compact ? 104 : 124,
+                            ),
+                            SizedBox(
+                              width: compact ? 0 : 24,
+                              height: compact ? 20 : 0,
+                            ),
+                            if (compact)
+                              profileInfo
+                            else
+                              Expanded(child: profileInfo),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(height: 18),
+                    FadeInUp(
+                      duration: const Duration(milliseconds: 420),
+                      delay: const Duration(milliseconds: 80),
+                      child: Material(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(18),
+                        child: InkWell(
+                          onTap: () => Get.to(() => const CoinShopScreen()),
+                          borderRadius: BorderRadius.circular(18),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 18,
+                              vertical: 15,
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 44,
+                                  height: 44,
+                                  alignment: Alignment.center,
+                                  decoration: BoxDecoration(
+                                    color: AppColors.accent.withValues(alpha: 0.18),
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                  child: const VpcCoinIcon(size: 24),
+                                ),
+                                const SizedBox(width: 14),
+                                const Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'VPC balance',
+                                        style: TextStyle(
+                                          color: AppColors.textSecondary,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                      SizedBox(height: 2),
+                                      Text(
+                                        'Your coins',
+                                        style: TextStyle(
+                                          color: AppColors.textPrimary,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Text(
+                                  '${user?.coins ?? 0}',
+                                  style: const TextStyle(
+                                    color: AppColors.textPrimary,
+                                    fontSize: 19,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                const Icon(
+                                  Icons.chevron_right_rounded,
+                                  color: AppColors.textLight,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 28),
+                    const Text(
+                      'Your account',
+                      style: TextStyle(
+                        color: AppColors.textPrimary,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    LayoutBuilder(
+                      builder: (context, menuConstraints) {
+                        final twoColumns = menuConstraints.maxWidth >= 560;
+                        final itemWidth = twoColumns
+                            ? (menuConstraints.maxWidth - 12) / 2
+                            : menuConstraints.maxWidth;
+                        final items = <_ProfileMenuData>[
+                          _ProfileMenuData(
+                            icon: Icons.card_giftcard_rounded,
+                            title: 'Gift Collection',
+                            subtitle: 'Gifts you have received',
+                            onTap: () => Get.to(
+                              () => const GiftCollectionScreen(),
+                            ),
+                          ),
+                          _ProfileMenuData(
+                            icon: Icons.storefront_rounded,
+                            title: 'Item Store',
+                            subtitle: 'Avatars and profile frames',
+                            onTap: () => Get.to(() => const StoreScreen()),
+                          ),
+                          _ProfileMenuData(
+                            icon: Icons.settings_rounded,
+                            title: 'Settings',
+                            subtitle: 'Privacy and app preferences',
+                            onTap: () => Get.to(() => const SettingsScreen()),
+                          ),
+                          _ProfileMenuData(
+                            icon: Icons.support_agent_rounded,
+                            title: 'Help & Support',
+                            subtitle: 'Get help with your account',
+                            onTap: () {},
+                          ),
+                          _ProfileMenuData(
+                            icon: Icons.logout_rounded,
+                            title: 'Log out',
+                            subtitle: 'Sign out of this account',
+                            color: AppColors.error,
+                            onTap: () => _confirmLogout(authController),
+                          ),
+                        ];
+
+                        return Wrap(
+                          spacing: 12,
+                          runSpacing: 12,
+                          children: [
+                            for (var index = 0; index < items.length; index++)
+                              SizedBox(
+                                width: itemWidth,
+                                child: FadeInUp(
+                                  duration: const Duration(milliseconds: 360),
+                                  delay: Duration(milliseconds: 40 * index),
+                                  child: _ProfileMenuItem(data: items[index]),
+                                ),
+                              ),
+                          ],
+                        );
+                      },
+                    ),
+                    SizedBox(height: compact ? 24 : 36),
+                  ],
                 );
-              },
+              }),
             ),
-          ],
-        ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _confirmLogout(AuthController authController) {
+    Get.dialog(
+      AlertDialog(
+        title: const Text('Log out?'),
+        content: const Text('You can sign back in at any time.'),
+        actions: [
+          TextButton(
+            onPressed: () => Get.back(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              await authController.logout();
+              Get.offAll(() => const LoginScreen());
+            },
+            child: const Text('Log out', style: TextStyle(color: AppColors.error)),
+          ),
+        ],
       ),
     );
   }
 }
 
-class _ProfileMenuItem extends StatelessWidget {
+class _ProfileBadge extends StatelessWidget {
   final IconData icon;
-  final String title;
-  final VoidCallback onTap;
-  final Color? iconColor;
-  final Color? titleColor;
+  final String label;
 
-  const _ProfileMenuItem({
-    required this.icon,
-    required this.title,
-    required this.onTap,
-    this.iconColor,
-    this.titleColor,
-  });
+  const _ProfileBadge({required this.icon, required this.label});
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              blurRadius: 10,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            Icon(icon, color: iconColor ?? AppColors.primary),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Text(
-                title,
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                  color: titleColor ?? AppColors.textPrimary,
-                ),
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 240),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.28)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: Colors.white),
+          const SizedBox(width: 5),
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
               ),
             ),
-            Icon(Icons.arrow_forward_ios, size: 16, color: AppColors.textLight),
-          ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProfileMenuData {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final Color? color;
+
+  const _ProfileMenuData({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.color,
+  });
+}
+
+class _ProfileMenuItem extends StatefulWidget {
+  final _ProfileMenuData data;
+
+  const _ProfileMenuItem({required this.data});
+
+  @override
+  State<_ProfileMenuItem> createState() => _ProfileMenuItemState();
+}
+
+class _ProfileMenuItemState extends State<_ProfileMenuItem> {
+  bool _isPressed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = widget.data.color ?? AppColors.primary;
+    return AnimatedScale(
+      scale: _isPressed ? 0.985 : 1,
+      duration: const Duration(milliseconds: 120),
+      curve: Curves.easeOut,
+      child: Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          onTap: widget.data.onTap,
+          onHighlightChanged: (value) => setState(() => _isPressed = value),
+          borderRadius: BorderRadius.circular(18),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 88),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: AppColors.border.withValues(alpha: 0.7)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.035),
+                  blurRadius: 16,
+                  offset: const Offset(0, 5),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 46,
+                  height: 46,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(15),
+                  ),
+                  child: Icon(widget.data.icon, color: color, size: 23),
+                ),
+                const SizedBox(width: 13),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.data.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: widget.data.color ?? AppColors.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        widget.data.subtitle,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          height: 1.25,
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 22,
+                  color: color.withValues(alpha: 0.75),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
